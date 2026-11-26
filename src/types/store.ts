@@ -140,12 +140,23 @@ export interface EmailTemplateConfig {
   customHtml: string;
 }
 
+export interface PromotionEmailConfig {
+  editorMode: EmailEditorMode;
+  subject: string;
+  title: string;
+  message: string;
+  coupon: string;
+  destinationUrl: string;
+  customHtml: string;
+}
+
 export interface EmailConfig {
   officialEmail: string;
   emailVerificationEnabled: boolean;
   gmailScriptUrl: string;
   emailLogoUrl: string;
   templates: Record<EmailTemplateKey, EmailTemplateConfig>;
+  promotion: PromotionEmailConfig;
 }
 
 export type PaymentMethod = 'pix' | 'credit_card' | 'external_link';

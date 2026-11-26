@@ -423,7 +423,7 @@ ${itemsText}
 [TOTAIS E PAGAMENTO]
 Forma de Pagamento: ${
     order.paymentMethod === 'pix'
-      ? 'PIX à Vista'
+      ? 'PIX'
       : order.paymentMethod === 'credit_card'
       ? `Cartão de Crédito (${order.installments}x de ${formatBRL(order.installmentValue)})`
       : 'Link de Pagamento Externo'
@@ -454,7 +454,7 @@ export function formatWhatsAppOrderMessage(order: Order, storeName: string): str
       : []),
     `• Pagamento: ${
       order.paymentMethod === 'pix'
-        ? 'PIX com Desconto'
+        ? 'PIX'
         : order.paymentMethod === 'credit_card'
         ? `Cartão de Crédito em ${order.installments}x de ${formatBRL(order.installmentValue)} (Solicito Link de Cobrança)`
         : 'Link de Pagamento Online'

@@ -13,9 +13,8 @@ import {
 } from '../types/store';
 import { roundCurrency } from '../utils/formatters';
 
-// Storage version: bump these keys whenever the default store data (src/data/initialStore.ts)
-// changes, so every browser discards its old cached copy and loads the new defaults.
-const STORE_STORAGE_KEY = 'bthtech_oficial_v5';
+const STORE_STORAGE_KEY = 'bthtech_prod_v1';
+const PREVIOUS_STORE_STORAGE_KEY = 'bthtech_oficial_v5';
 const CART_STORAGE_KEY = 'bthtech_oficial_v5_cart';
 const ACTIVE_CUSTOMER_KEY = 'bthtech_oficial_v5_active_customer';
 
@@ -132,8 +131,10 @@ function normalizeEmailConfig(rawEmail: unknown): EmailConfig {
     return {
       ...def,
       ...(custom || {}),
-      editorMode: custom?.editorMode === 'html' ? ('html' as const) : ('simple' as const),
-      customHtml: typeof custom?.customHtml === 'string' ? custom.customHtml : '',
+      editorMode: custom?.editorMode === 'html' || custom?.editorMode === 'simple'
+        ? custom.editorMode
+        : def.editorMode,
+      customHtml: typeof custom?.customHtml === 'string' ? custom.customHtml : def.customHtml,
     };
   };
 
@@ -143,8 +144,17 @@ function normalizeEmailConfig(rawEmail: unknown): EmailConfig {
     emailVerificationEnabled:
       typeof emailObj.emailVerificationEnabled === 'boolean'
         ? emailObj.emailVerificationEnabled
-        : Boolean(emailObj.emailJsEnabled),
+        : emailObj.emailJsEnabled ?? defaults.emailVerificationEnabled,
     emailLogoUrl: emailObj.emailLogoUrl || defaults.emailLogoUrl,
+    promotion: {
+      editorMode: emailObj.promotion?.editorMode === 'html' ? 'html' : 'simple',
+      subject: typeof emailObj.promotion?.subject === 'string' ? emailObj.promotion.subject : defaults.promotion.subject,
+      title: typeof emailObj.promotion?.title === 'string' ? emailObj.promotion.title : defaults.promotion.title,
+      message: typeof emailObj.promotion?.message === 'string' ? emailObj.promotion.message : defaults.promotion.message,
+      coupon: typeof emailObj.promotion?.coupon === 'string' ? emailObj.promotion.coupon : defaults.promotion.coupon,
+      destinationUrl: typeof emailObj.promotion?.destinationUrl === 'string' ? emailObj.promotion.destinationUrl : defaults.promotion.destinationUrl,
+      customHtml: typeof emailObj.promotion?.customHtml === 'string' ? emailObj.promotion.customHtml : defaults.promotion.customHtml,
+    },
     templates: {
       verification: mergeTemplate('verification'),
       orderConfirmed: mergeTemplate('orderConfirmed'),
@@ -157,7 +167,16 @@ function normalizeEmailConfig(rawEmail: unknown): EmailConfig {
 function loadInitialStore(): StoreState {
   try {
     const raw = localStorage.getItem(STORE_STORAGE_KEY);
-    if (!raw) return INITIAL_STORE_STATE;
+    if (!raw) {
+      const previous = localStorage.getItem(PREVIOUS_STORE_STORAGE_KEY);
+      if (!previous) return INITIAL_STORE_STATE;
+      const { orders, customers } = JSON.parse(previous) as Partial<StoreState>;
+      return {
+        ...INITIAL_STORE_STATE,
+        orders: normalizeOrders(orders),
+        customers: Array.isArray(customers) ? customers : INITIAL_STORE_STATE.customers,
+      };
+    }
     const parsed = JSON.parse(raw) as Partial<StoreState>;
     const rawTopPromo = parsed.visual?.topPromoText;
     const cleanedTopPromo =

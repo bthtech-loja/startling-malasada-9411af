@@ -82,7 +82,7 @@ function formatShortDateTime(iso?: string): string {
 }
 
 function getPaymentLabel(order: Order): string {
-  if (order.paymentMethod === 'pix') return 'PIX à Vista';
+  if (order.paymentMethod === 'pix') return 'PIX';
   if (order.paymentMethod === 'credit_card') {
     return `Cartão de Crédito (${order.installments}x de ${formatBRL(order.installmentValue)})`;
   }
