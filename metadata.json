@@ -1,0 +1,6 @@
+{
+  "name": "BTHTECH — Hardware & Periféricos",
+  "description": "Loja online especializada em hardware, SSDs NVMe, mouses gamer, teclados mecânicos, headsets e combos com envio rápido e NF-e.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
