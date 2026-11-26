@@ -664,7 +664,7 @@ export function CartCheckoutDrawer({
                   >
                     <div>
                       <div className="text-xs font-bold text-white">
-                        PIX Instantâneo ({pixPercent}% OFF)
+                        PIX
                       </div>
                       <div className="text-[11px] text-slate-400">
                         Aprovação imediata + envio prioritário

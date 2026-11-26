@@ -115,13 +115,7 @@ function buildOrderItemsListHtml(order: Order): string {
 }
 
 function getPaymentMethodLabel(order: Order): string {
-  if (order.paymentMethod === 'pix') {
-    if (order.pixDiscountAmount > 0 && order.subtotalBase > 0) {
-      const pct = Math.round((order.pixDiscountAmount / order.subtotalBase) * 100);
-      return `PIX (${pct > 0 ? `${pct}% OFF` : 'à Vista'})`;
-    }
-    return 'PIX (à Vista)';
-  }
+  if (order.paymentMethod === 'pix') return 'PIX';
   if (order.paymentMethod === 'credit_card') {
     return `Cartão de Crédito ${order.installments}x`;
   }

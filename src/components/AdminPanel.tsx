@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { acceptInvite, getUser, handleAuthCallback, login } from '@netlify/identity';
 import {
   ArrowLeft,
   Check,
@@ -68,6 +69,11 @@ import {
 } from '../utils/emailService';
 import { ResilientImage } from './ResilientImage';
 import { StudioProductImage } from './StudioProductImage';
+import {
+  CAMPAIGN_ENDPOINT, CAMPAIGN_INTERVAL_MS, CAMPAIGN_LIMIT, PROMOTION_VARIABLES,
+  getPromotionDestination, renderPromotionEmail, selectPromotionRecipients,
+  type CampaignQuota, type PromotionAudience,
+} from '../utils/promotionEmail';
 
 interface AdminPanelProps {
   store: StoreState;
@@ -195,7 +201,74 @@ export function AdminPanel({
 
   // Email templates & test dispatch state
   const [activeEmailSubTab, setActiveEmailSubTab] =
-    useState<EmailTemplateKey>('verification');
+    useState<EmailTemplateKey | 'promotion'>('verification');
+  const [audience, setAudience] = useState<PromotionAudience>('all');
+  const [campaignQuota, setCampaignQuota] = useState<CampaignQuota | null>(null);
+  const [campaignMessage, setCampaignMessage] = useState('');
+  const [campaignEmail, setCampaignEmail] = useState('');
+  const [inviteToken, setInviteToken] = useState('');
+  const [campaignBusy, setCampaignBusy] = useState(false);
+  const campaignLock = useRef(false);
+
+  async function readCampaignQuota() {
+    await getUser();
+    const response = await fetch(CAMPAIGN_ENDPOINT, { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error);
+    setCampaignQuota(data.quota);
+    return data.quota as CampaignQuota;
+  }
+
+  useEffect(() => {
+    void handleAuthCallback().then((callback) => {
+      if (callback?.type === 'invite' && callback.token) setInviteToken(callback.token);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (activeEmailSubTab === 'promotion') {
+      void readCampaignQuota().catch(() => setCampaignQuota(null));
+    }
+  }, [activeEmailSubTab]);
+
+  async function launchPromotion() {
+    if (campaignLock.current) return;
+    const promotion = store.email.promotion;
+    const destination = getPromotionDestination(promotion.destinationUrl, location.origin);
+    const recipients = selectPromotionRecipients(store.customers, store.orders, audience);
+    if (!destination || !promotion.subject.trim() || !promotion.title.trim() || !promotion.message.trim() ||
+        (promotion.editorMode === 'html' && !promotion.customHtml.trim()) || !store.email.gmailScriptUrl.trim()) {
+      setCampaignMessage('Preencha os campos da campanha e confira a URL do disparador.');
+      return;
+    }
+    campaignLock.current = true;
+    setCampaignBusy(true);
+    let sent = 0;
+    try {
+      const quota = await readCampaignQuota();
+      const batch = recipients.slice(0, quota.remaining);
+      if (!batch.length) throw new Error('Nenhum destinatário elegível ou vagas disponíveis para envio.');
+      for (const recipient of batch) {
+        if (sent) await new Promise((resolve) => setTimeout(resolve, CAMPAIGN_INTERVAL_MS));
+        const email = renderPromotionEmail(promotion, recipient.name, destination);
+        const response = await fetch(CAMPAIGN_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scriptUrl: store.email.gmailScriptUrl, to: recipient.email, ...email }),
+        });
+        const data = await response.json();
+        if (data.quota) setCampaignQuota(data.quota);
+        if (!response.ok) throw new Error(data.error);
+        sent += 1;
+        setCampaignMessage(`Envios confirmados nesta campanha: ${sent} de ${batch.length}.`);
+      }
+    } catch (error) {
+      setCampaignMessage(`${sent} envio(s) confirmado(s). ${error instanceof Error ? error.message : 'Não foi possível continuar o disparo.'}`);
+    } finally {
+      campaignLock.current = false;
+      setCampaignBusy(false);
+    }
+  }
   const [previewViewport, setPreviewViewport] = useState<'mobile' | 'desktop'>('mobile');
   const [testEmailTarget, setTestEmailTarget] = useState<string>(
     () => store.email?.officialEmail || ''
@@ -1233,7 +1306,7 @@ export function AdminPanel({
                   {/* 4-Column Pricing Row: Cost, Base Sale, Auto Margin %, Auto PIX */}
                   <div className="md:col-span-3 p-3.5 rounded bg-[#0B0D10]/70 border border-[#272D38] space-y-2.5">
                     <div className="text-[11px] font-display font-bold uppercase tracking-wider text-slate-300">
-                      Precificação, Margem &amp; PIX ({store.payment.pixDiscountPercent}% OFF Global)
+                      Precificação, Margem &amp; PIX
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                       <div>
@@ -2545,7 +2618,7 @@ export function AdminPanel({
                       Configuração de E-mail Oficial e Disparador Gmail
                     </h2>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Configure a conexão geral do Google Apps Script abaixo e personalize individualmente cada um dos 4 modelos de e-mail nas sub-abas.
+                      Configure a conexão do Google Apps Script e personalize os modelos e campanhas nas sub-abas.
                     </p>
                   </div>
                 </div>
@@ -2757,9 +2830,77 @@ export function AdminPanel({
                           </button>
                         );
                       })}
+                      <button
+                        type="button"
+                        onClick={() => setActiveEmailSubTab('promotion')}
+                        aria-pressed={activeEmailSubTab === 'promotion'}
+                        className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded px-3.5 py-2 text-xs font-semibold ${activeEmailSubTab === 'promotion' ? 'text-white' : 'text-slate-400 hover:text-white'}`}
+                        style={activeEmailSubTab === 'promotion' ? { backgroundColor: accentColor } : undefined}
+                      >
+                        <Mail className="w-4 h-4" /> 5. Promoções e Reativação
+                      </button>
                     </div>
 
-                    {/* 3. Individual Template Form for Selected Sub-Tab */}
+                    {activeEmailSubTab === 'promotion' ? (() => {
+                      const promotion = store.email.promotion;
+                      const updatePromotion = (patch: Partial<typeof promotion>) => setStore((previous) => ({
+                        ...previous,
+                        email: { ...previous.email, promotion: { ...previous.email.promotion, ...patch } },
+                      }));
+                      const field = 'w-full rounded border border-[#272D38] bg-[#161A20] p-2 text-sm text-white';
+                      const recipients = selectPromotionRecipients(store.customers, store.orders, audience);
+                      return <div className="space-y-4 rounded-md border border-[#272D38] bg-[#0B0D10] p-4">
+                        <h3 className="font-display font-bold text-white">5. Promoções e Reativação</h3>
+                        <fieldset disabled={campaignBusy} className="grid gap-3 sm:grid-cols-2">
+                          {([['subject', 'Assunto'], ['title', 'Título da Oferta ({{titulo_oferta}})'], ['coupon', 'Código do Cupom ({{cupom}})'], ['destinationUrl', 'Link de Destino ({{link_loja}})']] as const).map(([key, label]) => <label key={key} className="space-y-1 text-xs text-slate-300">
+                            <span>{label}</span><input className={field} value={promotion[key]} onChange={(event) => updatePromotion({ [key]: event.target.value })} />
+                          </label>)}
+                          <label className="space-y-1 text-xs text-slate-300 sm:col-span-2">Mensagem ({'{{mensagem_oferta}}'})
+                            <textarea rows={3} className={field} value={promotion.message} onChange={(event) => updatePromotion({ message: event.target.value })} />
+                          </label>
+                          <label className="space-y-1 text-xs text-slate-300">Editor
+                            <select className={field} value={promotion.editorMode} onChange={(event) => updatePromotion({ editorMode: event.target.value === 'html' ? 'html' : 'simple' })}>
+                              <option value="simple">Editor Visual Simples</option><option value="html">Código HTML Completo (&lt;&gt;)</option>
+                            </select>
+                          </label>
+                          <label className="space-y-1 text-xs text-slate-300">Destinatários
+                            <select className={field} value={audience} onChange={(event) => setAudience(event.target.value as PromotionAudience)}>
+                              <option value="all">Todos os clientes cadastrados</option>
+                              <option value="never">Clientes que nunca compraram</option>
+                              <option value="inactive">Clientes inativos há mais de 30 dias</option>
+                            </select>
+                          </label>
+                          {promotion.editorMode === 'html' && <label className="space-y-1 text-xs text-slate-300 sm:col-span-2">Código HTML Completo · {PROMOTION_VARIABLES.map((variable) => `{{${variable}}}`).join(' · ')}
+                            <textarea rows={8} className={`${field} font-mono`} value={promotion.customHtml} onChange={(event) => updatePromotion({ customHtml: event.target.value })} />
+                          </label>}
+                        </fieldset>
+                        <p className="text-xs text-slate-400">{recipients.length} destinatário(s) no cadastro deste navegador. Envie apenas a quem autorizou receber promoções e mantenha a aba aberta durante o disparo.</p>
+                        <p className="text-sm font-semibold text-white">Envios realizados hoje: {campaignQuota?.sent ?? '—'} / {CAMPAIGN_LIMIT} (Limite gratuito do Gmail)</p>
+                        {!campaignQuota && <form className="grid gap-2 sm:grid-cols-3" onSubmit={async (event) => {
+                          event.preventDefault();
+                          const form = event.currentTarget;
+                          const password = String(new FormData(form).get('campaign-password') ?? '');
+                          try {
+                            if (inviteToken) {
+                              await acceptInvite(inviteToken, password);
+                              setInviteToken('');
+                            } else await login(campaignEmail.trim(), password);
+                            await readCampaignQuota();
+                            setCampaignMessage('Conta autorizada.');
+                          } catch {
+                            setCampaignMessage('Não foi possível autorizar a conta ou consultar o contador. Confira o acesso administrativo.');
+                          } finally { form.reset(); }
+                        }}>
+                          {!inviteToken && <input required type="email" aria-label="E-mail da conta de campanhas" placeholder="E-mail da conta de campanhas" className={field} value={campaignEmail} onChange={(event) => setCampaignEmail(event.target.value)} />}
+                          <input required type="password" name="campaign-password" aria-label={inviteToken ? 'Nova senha' : 'Senha da conta de campanhas'} placeholder={inviteToken ? 'Defina sua senha' : 'Senha'} className={field} />
+                          <button className="rounded border border-[#272D38] px-3 py-2 text-xs font-bold text-white">{inviteToken ? 'Aceitar convite' : 'Autorizar disparos'}</button>
+                        </form>}
+                        <button type="button" disabled={campaignBusy || !campaignQuota?.remaining || !recipients.length} onClick={() => void launchPromotion()} className="inline-flex items-center gap-2 rounded bg-[#FF6500] px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+                          <Send className="h-4 w-4" /> {campaignBusy ? 'Disparando campanha…' : 'Disparar Campanha Agora'}
+                        </button>
+                        <p role="status" className="text-xs text-slate-300">{campaignMessage}</p>
+                      </div>;
+                    })() : (
                     <div className="p-4 sm:p-5 rounded-md bg-[#0B0D10] border border-[#272D38] space-y-4">
                       {/* Sub-tab header + individual enable/disable switch */}
                       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#272D38] pb-3">
@@ -3172,6 +3313,7 @@ export function AdminPanel({
                         )}
                       </div>
                     </div>
+                    )}
                   </div>
                 );
               })()}
